@@ -53,6 +53,7 @@ services:
   consumer:
     <<: *application
     command: [python, -m, payment_processing.workers.application]
+    stop_grace_period: 20s
     depends_on:
       migrate:
         condition: service_completed_successfully
