@@ -57,7 +57,7 @@ async def test_webhook_delivery_recovers_after_a_failed_attempt(
     assert second_delivery["payment_id"] == accepted_response.json()["payment_id"]
 
 
-async def test_webhook_is_retried_three_times_then_dead_lettered(
+async def test_webhook_attempt_limit_survives_redelivery(
     *, api_client: httpx.AsyncClient, payment_payload: dict[str, str], webhook_server: conftest.WebhookServer
 ) -> None:
     payment_headers: typing.Final = {"Idempotency-Key": str(uuid.uuid4())}
@@ -78,13 +78,18 @@ async def test_webhook_is_retried_three_times_then_dead_lettered(
         await rabbit_connection.channel() as rabbit_channel,
         (await rabbit_channel.get_queue(settings.rabbitmq_dead_letter_queue)).iterator(timeout=10) as dead_letters,
     ):
-        async for dead_letter in dead_letters:
-            async with dead_letter.process():
-                if json.loads(dead_letter.body)["payment_id"] == payment_id:
-                    break
-        else:
-            pytest.fail("The failed payment event did not reach the dead-letter queue")
+        dead_letter: typing.Final = await anext(dead_letters)
+        async with dead_letter.process():
+            await rabbit_channel.default_exchange.publish(
+                aio_pika.Message(dead_letter.body, content_type=dead_letter.content_type),
+                routing_key=settings.rabbitmq_payment_queue,
+            )
+        replayed_dead_letter: typing.Final = await anext(dead_letters)
+        await replayed_dead_letter.ack()
 
     assert first_delivery == second_delivery == third_delivery
-    assert third_delivery["payment_id"] == payment_id
+    assert third_delivery["payment_id"] == json.loads(replayed_dead_letter.body)["payment_id"] == payment_id
+    first_attempt, second_attempt, third_attempt = webhook_server.delivery_times
+    assert second_attempt - first_attempt >= 0.95
+    assert third_attempt - second_attempt >= 1.95
     assert webhook_server.notifications.empty()

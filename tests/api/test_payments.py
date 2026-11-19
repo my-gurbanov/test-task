@@ -26,8 +26,10 @@ async def test_payments_require_api_key(api_client: httpx.AsyncClient, request_m
     ("invalid_fields", "supply_idempotency"),
     [
         ({"amount": "0.001"}, True),
+        ({"amount": 100000000000000.02}, True),
         ({"currency": "GBP"}, True),
         ({"webhook_url": "ftp://example.com"}, True),
+        ({"metadata": {"entries": [{"reference": "\x00"}]}}, True),
         ({}, False),
     ],
 )
@@ -35,7 +37,7 @@ async def test_create_payment_rejects_invalid_input(
     *,
     api_client: httpx.AsyncClient,
     payment_payload: dict[str, str],
-    invalid_fields: dict[str, str],
+    invalid_fields: dict[str, object],
     supply_idempotency: bool,
 ) -> None:
     payment_headers: typing.Final = {"Idempotency-Key": str(uuid.uuid4())} if supply_idempotency else {}

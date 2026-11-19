@@ -24,6 +24,7 @@ def upgrade() -> None:
         sqlalchemy.Column("request_digest", sqlalchemy.String(64), nullable=False),
         sqlalchemy.Column("webhook_url", sqlalchemy.String(), nullable=False),
         sqlalchemy.Column("processed_at", sqlalchemy.DateTime(timezone=True)),
+        sqlalchemy.Column("webhook_attempts", sqlalchemy.Integer(), server_default="0", nullable=False),
         sqlalchemy.Column("webhook_delivered_at", sqlalchemy.DateTime(timezone=True)),
         sqlalchemy.Column(
             "created_at", sqlalchemy.DateTime(timezone=True), server_default=sqlalchemy.func.now(), nullable=False

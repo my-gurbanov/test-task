@@ -8,7 +8,14 @@ lint:
     uv run --locked flake8 payment_processing tests
 
 test *args:
-    docker compose run --build --rm --use-aliases tests python -m pytest -n auto {{ args }}
+    #!/bin/sh
+    set -eu
+    export COMPOSE_PROJECT_NAME="payment-processing-test-$$" PAYMENT_HTTP_PORT=0
+    trap 'docker compose down --volumes' EXIT
+    if ! docker compose run --build --rm --use-aliases tests python -m pytest -n auto {{ args }}; then
+        docker compose logs --no-color
+        exit 1
+    fi
 
 agent-fix:
     uv run --locked ruff format .

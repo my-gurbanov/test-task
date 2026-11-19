@@ -12,3 +12,6 @@ A client-supplied identifier for one payment request. Reusing it with the same r
 
 **Payment notification**:
 The client's notification of a payment's terminal outcome. Its event identifier stays the same on delivery retries.
+
+**Delivery attempt**:
+One of the three sends allowed for a payment notification. It counts once the service commits to sending, even if it stops before making the request.

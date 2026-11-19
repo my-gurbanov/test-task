@@ -5,25 +5,17 @@ import json
 import typing
 import uuid
 
+import backoff
 import structlog
 
-from payment_processing import domain
+from payment_processing import domain, exceptions
 from payment_processing.database import repositories
 from payment_processing.external import webhooks
 from payment_processing.external.payment_gateway import PaymentGatewayClient
+from payment_processing.settings import settings
 
 
 logger: typing.Final = structlog.get_logger(__name__)  # noqa: COP005
-
-
-@typing.final
-class IdempotencyConflictError(Exception):
-    pass
-
-
-@typing.final
-class PaymentNotFoundError(Exception):
-    pass
 
 
 @typing.final
@@ -48,7 +40,7 @@ class CreatePaymentUseCase:
         )
         if payment_result is None:
             logger.info("Payment idempotency conflict")
-            raise IdempotencyConflictError
+            raise exceptions.IdempotencyConflictError
         accepted_payment, newly_created = payment_result
         logger.info(
             "Payment accepted" if newly_created else "Original payment acceptance replayed",
@@ -65,7 +57,7 @@ class FetchPaymentUseCase:
     async def execute_use_case(self, payment_id: uuid.UUID) -> repositories.PaymentDetails:
         payment_record: typing.Final = await self.payment_repository.fetch_payment(payment_id)
         if payment_record is None:
-            raise PaymentNotFoundError(payment_id)
+            raise exceptions.PaymentNotFoundError(payment_id)
         return payment_record
 
 
@@ -105,6 +97,26 @@ class ProcessPaymentUseCase:
             status=payment_record.status,
             processed_at=payment_record.processed_at,
         )
-        await self.webhook_client.send_notification(webhook_url=payment_record.webhook_url, notification=notification)
+        try:
+            await self.send_webhook_attempt(webhook_url=payment_record.webhook_url, notification=notification)
+        except exceptions.WebhookDeliveryError as delivery_error:
+            raise exceptions.WebhookAttemptsExhaustedError(payment_id) from delivery_error
+
+    @backoff.on_exception(
+        backoff.expo,
+        exceptions.WebhookDeliveryError,
+        max_tries=settings.webhook_retry_attempts,
+        factor=settings.webhook_retry_initial_delay,
+        jitter=None,
+        logger=None,
+    )
+    async def send_webhook_attempt(self, *, webhook_url: str, notification: webhooks.PaymentNotification) -> None:
+        payment_id: typing.Final = notification.payment_id
+        if not await self.payment_repository.record_webhook_attempt(payment_id):
+            if (await self.fetch_payment_use_case.execute_use_case(payment_id)).webhook_delivered_at is not None:
+                logger.info("Payment notification already delivered", payment_id=payment_id)
+                return
+            raise exceptions.WebhookAttemptsExhaustedError(payment_id)
+        await self.webhook_client.send_notification(webhook_url=webhook_url, notification=notification)
         await self.payment_repository.record_webhook_delivery(payment_id)
         logger.info("Payment notification delivered", payment_id=payment_id)

@@ -28,6 +28,10 @@ retry_database_operation: typing.Final = backoff.on_exception(
 async def create_database_engine() -> typing.AsyncIterator[sqlalchemy_async.AsyncEngine]:
     database_engine: typing.Final = sqlalchemy_async.create_async_engine(
         settings.database_url,
+        connect_args={
+            "connect_timeout": settings.database_connect_timeout,
+            "options": f"-c statement_timeout={settings.database_statement_timeout_ms}",
+        },
         pool_size=settings.database_pool_size,
         max_overflow=settings.database_pool_max_overflow,
         pool_timeout=settings.database_pool_timeout,

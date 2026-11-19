@@ -21,6 +21,8 @@ class Settings(microbootstrap.FastApiSettings, microbootstrap.FastStreamSettings
     payment_api_key: pydantic.SecretStr = pydantic.Field(validation_alias="API_KEY", min_length=1)
 
     database_url: str
+    database_connect_timeout: pydantic.PositiveInt = 5
+    database_statement_timeout_ms: pydantic.PositiveInt = 5000
     database_pool_size: pydantic.PositiveInt = 5
     database_pool_max_overflow: pydantic.NonNegativeInt = 10
     database_pool_timeout: pydantic.PositiveFloat = 30
@@ -29,6 +31,7 @@ class Settings(microbootstrap.FastApiSettings, microbootstrap.FastStreamSettings
     database_retry_attempts: pydantic.PositiveInt = 3
     database_retry_initial_delay: pydantic.PositiveFloat = 0.1
     database_retry_max_delay: pydantic.PositiveFloat = 1
+    database_redelivery_delay: pydantic.PositiveFloat = 2
 
     rabbitmq_url: pydantic.SecretStr
     rabbitmq_payment_queue: str = "payments.new"

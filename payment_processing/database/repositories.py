@@ -15,6 +15,7 @@ from sqlalchemy.ext import asyncio as sqlalchemy_async
 import payment_processing.database.connection as database_connection
 from payment_processing import domain
 from payment_processing.database import models
+from payment_processing.settings import settings
 
 
 logger: typing.Final = structlog.get_logger(__name__)  # noqa: COP005
@@ -50,7 +51,11 @@ class PaymentRepository:
 
     @database_connection.retry_database_operation
     async def save_payment(
-        self, *, payment_request: domain.PaymentRequest, idempotency_key: str, request_digest: str
+        self,
+        *,
+        payment_request: domain.PaymentRequest,
+        idempotency_key: str,
+        request_digest: str,
     ) -> tuple[PaymentDetails, bool] | None:
         try:
             async with self.sessionmaker.begin() as database_session:
@@ -75,7 +80,8 @@ class PaymentRepository:
                     return PaymentDetails.model_validate(inserted_payment), True
 
                 existing_payment: typing.Final = await PaymentLookup(
-                    session=database_session, wrap_exceptions=False
+                    session=database_session,
+                    wrap_exceptions=False,
                 ).get_one(idempotency_key=idempotency_key)
                 if existing_payment.request_digest != request_digest:
                     return None
@@ -89,7 +95,8 @@ class PaymentRepository:
         try:
             async with self.sessionmaker() as database_session:
                 payment_record: typing.Final = await PaymentLookup(
-                    session=database_session, wrap_exceptions=False
+                    session=database_session,
+                    wrap_exceptions=False,
                 ).get_one_or_none(payment_id=payment_id)
                 return PaymentDetails.model_validate(payment_record) if payment_record is not None else None
         except database_connection.DATABASE_OPERATION_ERRORS as database_error:
@@ -106,14 +113,37 @@ class PaymentRepository:
                         models.PaymentRecord.payment_id == payment_id,
                         models.PaymentRecord.payment_status == domain.PaymentStatus.PENDING,
                     )
-                    .values(payment_status=payment_status, processed_at=sqlalchemy.func.now())
+                    .values(payment_status=payment_status, processed_at=sqlalchemy.func.now()),
                 )
                 return PaymentDetails.model_validate(
-                    await PaymentLookup(session=database_session, wrap_exceptions=False).get(payment_id)
+                    await PaymentLookup(session=database_session, wrap_exceptions=False).get(payment_id),
                 )
         except database_connection.DATABASE_OPERATION_ERRORS as database_error:
             logger.warning("Failed to record outcome", payment_id=payment_id, error_type=type(database_error).__name__)
             raise
+
+    @database_connection.retry_database_operation
+    async def record_webhook_attempt(self, payment_id: uuid.UUID) -> bool:
+        try:
+            async with self.sessionmaker.begin() as database_session:
+                reserved_payment: typing.Final = await database_session.scalar(
+                    sqlalchemy.update(models.PaymentRecord)
+                    .where(
+                        models.PaymentRecord.payment_id == payment_id,
+                        models.PaymentRecord.webhook_attempts < settings.webhook_retry_attempts,
+                        models.PaymentRecord.webhook_delivered_at.is_(None),
+                    )
+                    .values(webhook_attempts=models.PaymentRecord.webhook_attempts + 1)
+                    .returning(models.PaymentRecord.payment_id),
+                )
+        except database_connection.DATABASE_OPERATION_ERRORS as database_error:
+            logger.warning(
+                "Failed to reserve webhook attempt",
+                payment_id=payment_id,
+                error_type=type(database_error).__name__,
+            )
+            raise
+        return reserved_payment is not None
 
     @database_connection.retry_database_operation
     async def record_webhook_delivery(self, payment_id: uuid.UUID) -> None:
@@ -125,11 +155,13 @@ class PaymentRepository:
                         models.PaymentRecord.payment_id == payment_id,
                         models.PaymentRecord.webhook_delivered_at.is_(None),
                     )
-                    .values(webhook_delivered_at=sqlalchemy.func.now())
+                    .values(webhook_delivered_at=sqlalchemy.func.now()),
                 )
         except database_connection.DATABASE_OPERATION_ERRORS as database_error:
             logger.warning(
-                "Failed to record webhook delivery", payment_id=payment_id, error_type=type(database_error).__name__
+                "Failed to record webhook delivery",
+                payment_id=payment_id,
+                error_type=type(database_error).__name__,
             )
             raise
 
@@ -147,7 +179,7 @@ class OutboxRepository:
                 .where(models.OutboxEvent.published_at.is_(None))
                 .order_by(models.OutboxEvent.created_at, models.OutboxEvent.payment_id)
                 .limit(1)
-                .with_for_update(skip_locked=True)
+                .with_for_update(skip_locked=True),
             )
             if outbox_record is None:
                 yield None

@@ -3,13 +3,13 @@ import datetime
 import typing
 import uuid
 
-import backoff
 import base_client
 import httpx
 import pydantic
 import structlog
 
 from payment_processing.domain import PaymentStatus
+from payment_processing.exceptions import WebhookDeliveryError
 from payment_processing.settings import settings
 
 
@@ -25,11 +25,6 @@ class PaymentNotification(pydantic.BaseModel):
 
 
 @typing.final
-class WebhookDeliveryError(Exception):
-    pass
-
-
-@typing.final
 class WebhookClient(base_client.BaseClient):
     @typing.override
     async def _process_request(self, request: httpx.Request) -> httpx.Response:  # noqa: COP006
@@ -37,14 +32,6 @@ class WebhookClient(base_client.BaseClient):
         await response.aclose()
         return response
 
-    @backoff.on_exception(
-        backoff.expo,
-        WebhookDeliveryError,
-        max_tries=settings.webhook_retry_attempts,
-        factor=settings.webhook_retry_initial_delay,
-        jitter=None,
-        logger=None,
-    )
     async def send_notification(self, *, webhook_url: str, notification: PaymentNotification) -> None:
         webhook_request: typing.Final = self.client.build_request(
             "POST",

@@ -41,6 +41,7 @@ class PaymentRecord(DatabaseBase):
     request_digest: orm.Mapped[str] = orm.mapped_column(sqlalchemy.String(64))
     webhook_url: orm.Mapped[str]
     processed_at: orm.Mapped[datetime.datetime | None] = orm.mapped_column(sqlalchemy.DateTime(timezone=True))
+    webhook_attempts: orm.Mapped[int] = orm.mapped_column(server_default="0")
     webhook_delivered_at: orm.Mapped[datetime.datetime | None] = orm.mapped_column(sqlalchemy.DateTime(timezone=True))
 
 

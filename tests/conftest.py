@@ -4,6 +4,7 @@ import http.server
 import json
 import queue
 import threading
+import time
 import typing
 import uuid
 
@@ -19,6 +20,7 @@ PAYMENTS_PATH: typing.Final = "/api/v1/payments"
 @typing.final
 class WebhookServer(http.server.ThreadingHTTPServer):
     notifications: queue.Queue[dict[str, str]]
+    delivery_times: list[float]
     delivery_attempts: int = 0
 
     async def receive_notification(self, timeout_seconds: float = 30) -> dict[str, str]:
@@ -30,6 +32,7 @@ class WebhookHandler(http.server.BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: COP007
         webhook_server: typing.Final = typing.cast("WebhookServer", self.server)
         webhook_server.delivery_attempts += 1
+        webhook_server.delivery_times.append(time.monotonic())
         webhook_server.notifications.put(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
         if self.path == "/disconnect-once" and webhook_server.delivery_attempts == 1:
             return
@@ -44,6 +47,7 @@ class WebhookHandler(http.server.BaseHTTPRequestHandler):
 def webhook_server() -> typing.Iterator[WebhookServer]:
     test_webhook_server: typing.Final = WebhookServer(("", 0), WebhookHandler)
     test_webhook_server.notifications = queue.Queue()
+    test_webhook_server.delivery_times = []
     server_thread: typing.Final = threading.Thread(target=test_webhook_server.serve_forever, daemon=True)
     server_thread.start()
     try:

@@ -12,10 +12,14 @@ from payment_processing.workers.application import run_consumer
 
 
 @contextlib.asynccontextmanager
-async def run_application_lifespan(_application: fastapi.FastAPI) -> typing.AsyncGenerator[None]:
+async def run_application_lifespan(application: fastapi.FastAPI) -> typing.AsyncGenerator[None]:
     try:
         async with run_consumer():
-            yield
+            application.state.payment_worker_ready = True
+            try:
+                yield
+            finally:
+                application.state.payment_worker_ready = False
     finally:
         await IOCContainer.tear_down()
 
