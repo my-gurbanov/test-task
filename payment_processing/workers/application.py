@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import signal
 import typing
 
 import structlog
@@ -50,3 +51,19 @@ async def run_consumer() -> typing.AsyncGenerator[None]:
     finally:
         logger.info("Stopping payment consumer")
         await consumer_application.stop()
+
+
+async def run_main() -> None:
+    shutdown_event: typing.Final = asyncio.Event()
+    event_loop: typing.Final = asyncio.get_running_loop()
+    event_loop.add_signal_handler(signal.SIGINT, shutdown_event.set)
+    event_loop.add_signal_handler(signal.SIGTERM, shutdown_event.set)
+    try:
+        async with run_consumer():
+            await shutdown_event.wait()
+    finally:
+        await IOCContainer.tear_down()
+
+
+if __name__ == "__main__":
+    asyncio.run(run_main())

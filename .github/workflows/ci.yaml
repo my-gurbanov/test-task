@@ -18,6 +18,7 @@ jobs:
           python-version: "3.15"
       - uses: extractions/setup-just@v3
       - run: just lint
+      - run: git diff --exit-code
 
   test:
     runs-on: ubuntu-latest

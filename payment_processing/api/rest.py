@@ -56,16 +56,10 @@ type FetchPaymentUseCaseDependency = typing.Annotated[
 @PAYMENT_ROUTER.post("", status_code=fastapi.status.HTTP_202_ACCEPTED)
 async def create_payment(
     *,
-    http_request: fastapi.Request,
     payment_request: domain.PaymentRequest,
     idempotency_key: typing.Annotated[str, fastapi.Header(alias="Idempotency-Key", min_length=1, max_length=255)],
     create_payment_use_case: CreatePaymentUseCaseDependency,
 ) -> AcceptedPayment:
-    if not http_request.app.state.payment_worker_ready:
-        raise fastapi.HTTPException(
-            status_code=fastapi.status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Payment worker unavailable",
-        )
     try:
         payment_record: typing.Final = await create_payment_use_case.execute_use_case(payment_request, idempotency_key)
     except exceptions.IdempotencyConflictError as conflict_error:
