@@ -35,7 +35,8 @@ async def verify_api_key(presented_key: typing.Annotated[str | None, fastapi.Sec
         raise fastapi.HTTPException(status_code=fastapi.status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
 
 
-# /v1 оставляем по ТЗ. Версию лучше передавать в заголовке, чтобы в URL остался адрес самого ресурса.
+# /v1 оставляем по ТЗ. Версию мне нравится передавать в заголовке, чтобы в URL остался адрес самого ресурса.
+# Я бы сделал пути следующими: api/rest/payments
 PAYMENT_ROUTER: typing.Final = fastapi.APIRouter(
     prefix="/api/v1/payments",
     tags=["payments"],

@@ -31,14 +31,8 @@ class WebhookDeliveryError(Exception):
 
 @typing.final
 class WebhookClient(base_client.BaseClient):
-    __slots__ = ()
-
-    def __init__(self, *, http_client: httpx.AsyncClient) -> None:
-        super().__init__(client=http_client)
-
     @typing.override
     async def _process_request(self, request: httpx.Request) -> httpx.Response:  # noqa: COP006
-        # Webhook acknowledgments only need the response status.
         response: typing.Final = await self.client.send(request, stream=True)
         await response.aclose()
         return response
@@ -53,7 +47,9 @@ class WebhookClient(base_client.BaseClient):
     )
     async def send_notification(self, *, webhook_url: str, notification: PaymentNotification) -> None:
         webhook_request: typing.Final = self.client.build_request(
-            "POST", webhook_url, json=notification.model_dump(mode="json")
+            "POST",
+            webhook_url,
+            json=notification.model_dump(mode="json"),
         )
         try:
             async with asyncio.timeout(settings.webhook_timeout):

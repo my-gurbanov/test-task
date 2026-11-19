@@ -10,7 +10,16 @@ from sqlalchemy.dialects.postgresql import JSONB
 
 
 class DatabaseBase(orm.DeclarativeBase):
-    pass
+    created_at: orm.Mapped[datetime.datetime] = orm.mapped_column(
+        sqlalchemy.DateTime(timezone=True),
+        server_default=sqlalchemy.func.now(),
+    )
+    updated_at: orm.Mapped[datetime.datetime] = orm.mapped_column(
+        sqlalchemy.DateTime(timezone=True),
+        server_default=sqlalchemy.func.now(),
+        onupdate=sqlalchemy.func.now(),
+    )
+    deleted_at: orm.Mapped[datetime.datetime | None] = orm.mapped_column(sqlalchemy.DateTime(timezone=True))
 
 
 @typing.final
@@ -31,9 +40,6 @@ class PaymentRecord(DatabaseBase):
     idempotency_key: orm.Mapped[str] = orm.mapped_column(sqlalchemy.String(255), unique=True)
     request_digest: orm.Mapped[str] = orm.mapped_column(sqlalchemy.String(64))
     webhook_url: orm.Mapped[str]
-    created_at: orm.Mapped[datetime.datetime] = orm.mapped_column(
-        sqlalchemy.DateTime(timezone=True), server_default=sqlalchemy.func.now()
-    )
     processed_at: orm.Mapped[datetime.datetime | None] = orm.mapped_column(sqlalchemy.DateTime(timezone=True))
     webhook_delivered_at: orm.Mapped[datetime.datetime | None] = orm.mapped_column(sqlalchemy.DateTime(timezone=True))
 
@@ -51,9 +57,7 @@ class OutboxEvent(DatabaseBase):
     )
 
     payment_id: orm.Mapped[uuid.UUID] = orm.mapped_column(
-        sqlalchemy.ForeignKey("payments.payment_id"), primary_key=True
-    )
-    created_at: orm.Mapped[datetime.datetime] = orm.mapped_column(
-        sqlalchemy.DateTime(timezone=True), server_default=sqlalchemy.func.now()
+        sqlalchemy.ForeignKey("payments.payment_id"),
+        primary_key=True,
     )
     published_at: orm.Mapped[datetime.datetime | None] = orm.mapped_column(sqlalchemy.DateTime(timezone=True))

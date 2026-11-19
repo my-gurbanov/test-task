@@ -1,5 +1,4 @@
 import contextlib
-import logging
 import typing
 
 import fastapi
@@ -22,7 +21,6 @@ async def run_application_lifespan(_application: fastapi.FastAPI) -> typing.Asyn
 
 
 def build_application() -> fastapi.FastAPI:
-    logging.getLogger("httpx").setLevel(logging.WARNING)
     fastapi_application: typing.Final = (
         FastApiBootstrapper(settings)
         .configure_application(FastApiConfig(lifespan=run_application_lifespan))

@@ -30,19 +30,20 @@ class IOCContainer(that_depends.BaseContainer):
     payment_repository = providers.Factory(database_repositories.PaymentRepository, sessionmaker=sessionmaker.cast)
     outbox_repository = providers.Factory(database_repositories.OutboxRepository, sessionmaker=sessionmaker.cast)
     create_payment_use_case = providers.Factory(
-        payments.CreatePaymentUseCase, payment_repository=payment_repository.cast
+        payments.CreatePaymentUseCase,
+        payment_repository=payment_repository.cast,
     )
     fetch_payment_use_case = providers.Factory(payments.FetchPaymentUseCase, payment_repository=payment_repository.cast)
 
     payment_gateway_client = providers.Singleton(PaymentGatewayClient)
     webhook_http_client = providers.Resource(create_webhook_http_client)
-    webhook_client = providers.Factory(WebhookClient, http_client=webhook_http_client.cast)
+    webhook_client = providers.Factory(WebhookClient, client=webhook_http_client.cast)
     process_payment_use_case = providers.Factory(
         payments.ProcessPaymentUseCase,
         fetch_payment_use_case=fetch_payment_use_case.cast,
         payment_repository=payment_repository.cast,
         payment_gateway_client=payment_gateway_client.cast,
-        webhook_client=webhook_client.cast,
+        webhook_client=typing.cast("WebhookClient", webhook_client.cast),
     )
 
     rabbit_broker = providers.Singleton(

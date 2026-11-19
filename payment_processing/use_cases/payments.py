@@ -32,15 +32,19 @@ class CreatePaymentUseCase:
     payment_repository: repositories.PaymentRepository
 
     async def execute_use_case(
-        self, payment_request: domain.PaymentRequest, idempotency_key: str
+        self,
+        payment_request: domain.PaymentRequest,
+        idempotency_key: str,
     ) -> repositories.PaymentDetails:
         normalized_request: typing.Final = payment_request.model_dump(mode="json")
         normalized_request["amount"] = str(payment_request.amount.quantize(decimal.Decimal("0.01")))
         request_digest: typing.Final = hashlib.sha256(
-            json.dumps(normalized_request, sort_keys=True).encode()
+            json.dumps(normalized_request, sort_keys=True).encode(),
         ).hexdigest()
         payment_result: typing.Final = await self.payment_repository.save_payment(
-            payment_request=payment_request, idempotency_key=idempotency_key, request_digest=request_digest
+            payment_request=payment_request,
+            idempotency_key=idempotency_key,
+            request_digest=request_digest,
         )
         if payment_result is None:
             logger.info("Payment idempotency conflict")
@@ -81,7 +85,8 @@ class ProcessPaymentUseCase:
         was_pending: typing.Final = existing_payment.status == domain.PaymentStatus.PENDING
         payment_record: typing.Final = (
             await self.payment_repository.record_outcome(
-                payment_id, await self.payment_gateway_client.process_payment()
+                payment_id,
+                await self.payment_gateway_client.process_payment(),
             )
             if was_pending
             else existing_payment

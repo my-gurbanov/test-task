@@ -7,6 +7,7 @@ import uuid
 
 import pydantic
 import sqlalchemy
+import structlog
 from advanced_alchemy.repository import SQLAlchemyAsyncRepository
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext import asyncio as sqlalchemy_async
@@ -14,6 +15,9 @@ from sqlalchemy.ext import asyncio as sqlalchemy_async
 import payment_processing.database.connection as database_connection
 from payment_processing import domain
 from payment_processing.database import models
+
+
+logger: typing.Final = structlog.get_logger(__name__)  # noqa: COP005
 
 
 @typing.final
@@ -48,7 +52,7 @@ class PaymentRepository:
     async def save_payment(
         self, *, payment_request: domain.PaymentRequest, idempotency_key: str, request_digest: str
     ) -> tuple[PaymentDetails, bool] | None:
-        with database_connection.record_database_errors("save_payment"):
+        try:
             async with self.sessionmaker.begin() as database_session:
                 insert_payment: typing.Final = (
                     insert(models.PaymentRecord)
@@ -76,19 +80,25 @@ class PaymentRepository:
                 if existing_payment.request_digest != request_digest:
                     return None
                 return PaymentDetails.model_validate(existing_payment), False
+        except database_connection.DATABASE_OPERATION_ERRORS as database_error:
+            logger.warning("Failed to save payment", error_type=type(database_error).__name__)
+            raise
 
     @database_connection.retry_database_operation
     async def fetch_payment(self, payment_id: uuid.UUID) -> PaymentDetails | None:
-        with database_connection.record_database_errors("fetch_payment"):
+        try:
             async with self.sessionmaker() as database_session:
                 payment_record: typing.Final = await PaymentLookup(
                     session=database_session, wrap_exceptions=False
                 ).get_one_or_none(payment_id=payment_id)
                 return PaymentDetails.model_validate(payment_record) if payment_record is not None else None
+        except database_connection.DATABASE_OPERATION_ERRORS as database_error:
+            logger.warning("Failed to fetch payment", payment_id=payment_id, error_type=type(database_error).__name__)
+            raise
 
     @database_connection.retry_database_operation
     async def record_outcome(self, payment_id: uuid.UUID, payment_status: domain.PaymentStatus) -> PaymentDetails:
-        with database_connection.record_database_errors("record_outcome"):
+        try:
             async with self.sessionmaker.begin() as database_session:
                 await database_session.execute(
                     sqlalchemy.update(models.PaymentRecord)
@@ -101,10 +111,13 @@ class PaymentRepository:
                 return PaymentDetails.model_validate(
                     await PaymentLookup(session=database_session, wrap_exceptions=False).get(payment_id)
                 )
+        except database_connection.DATABASE_OPERATION_ERRORS as database_error:
+            logger.warning("Failed to record outcome", payment_id=payment_id, error_type=type(database_error).__name__)
+            raise
 
     @database_connection.retry_database_operation
     async def record_webhook_delivery(self, payment_id: uuid.UUID) -> None:
-        with database_connection.record_database_errors("record_webhook_delivery"):
+        try:
             async with self.sessionmaker.begin() as database_session:
                 await database_session.execute(
                     sqlalchemy.update(models.PaymentRecord)
@@ -114,6 +127,11 @@ class PaymentRepository:
                     )
                     .values(webhook_delivered_at=sqlalchemy.func.now())
                 )
+        except database_connection.DATABASE_OPERATION_ERRORS as database_error:
+            logger.warning(
+                "Failed to record webhook delivery", payment_id=payment_id, error_type=type(database_error).__name__
+            )
+            raise
 
 
 @typing.final

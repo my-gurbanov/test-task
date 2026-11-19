@@ -11,7 +11,6 @@ from faststream.rabbit import RabbitBroker
 
 from payment_processing.database import connection
 from payment_processing.database.repositories import OutboxRepository
-from payment_processing.external import rabbitmq
 from payment_processing.settings import settings
 
 
@@ -26,12 +25,6 @@ RABBITMQ_PUBLISH_ERRORS: typing.Final = (
     exceptions.DeliveryError,
 )
 OUTBOX_OPERATION_ERRORS: typing.Final = (*RABBITMQ_PUBLISH_ERRORS, *connection.DATABASE_OPERATION_ERRORS)
-
-
-def is_permanent_publication_error(publish_error: Exception) -> bool:
-    return not isinstance(publish_error, RABBITMQ_PUBLISH_ERRORS) and connection.is_permanent_database_error(
-        publish_error
-    )
 
 
 @typing.final
@@ -55,7 +48,6 @@ class PublishOutboxUseCase:
         OUTBOX_OPERATION_ERRORS,
         factor=settings.outbox_retry_initial_delay,
         max_value=settings.outbox_retry_max_delay,
-        giveup=is_permanent_publication_error,
         logger=None,
     )
     async def publish_next_event(self) -> bool:
@@ -65,7 +57,7 @@ class PublishOutboxUseCase:
                     return False
                 await self.rabbit_broker.publish(
                     PaymentEvent(payment_id=payment_id).model_dump(mode="json"),
-                    queue=rabbitmq.PAYMENT_QUEUE,
+                    queue=settings.rabbitmq_payment_queue,
                     message_id=str(payment_id),
                     mandatory=True,
                     persist=True,
