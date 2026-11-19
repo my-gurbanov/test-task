@@ -3,6 +3,7 @@
 .venv
 .env
 .coverage*
+coverage.lcov
 .pytest_cache
 .ruff_cache
 **/__pycache__

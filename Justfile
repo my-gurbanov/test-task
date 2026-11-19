@@ -12,6 +12,6 @@ lint:
 
 test *args:
     #!/bin/sh
-    export COMPOSE_PROJECT_NAME="payment-processing-test-$$" PAYMENT_HTTP_PORT=0
+    export COMPOSE_PROJECT_NAME="payment-processing-test-$$"
     trap 'docker compose down --volumes' EXIT
-    docker compose run --build --rm --use-aliases tests python -m pytest -n auto {{ args }}
+    docker compose run --build --rm --user "$(id -u):$(id -g)" -v "$PWD:/srv/www" tests python -m pytest {{ args }}

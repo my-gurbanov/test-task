@@ -1,5 +1,8 @@
 # Асинхронный процессинг платежей
 
+[![CI](https://github.com/my-gurbanov/test-task/actions/workflows/ci.yaml/badge.svg?branch=main)](https://github.com/my-gurbanov/test-task/actions/workflows/ci.yaml)
+[![Coverage](https://coveralls.io/repos/github/my-gurbanov/test-task/badge.svg?branch=main)](https://coveralls.io/github/my-gurbanov/test-task?branch=main)
+
 Сервис принимает платежи по HTTP. Воркер эмулирует работу платёжного шлюза и отправляет результат на webhook клиента.
 
 ## Запуск
@@ -45,4 +48,6 @@ just lint
 just test
 ```
 
-`just lint` применяет исправления Ruff и запускает ty и flake8. Для него нужны Python 3.15 и uv. `just test` запускает pytest в том же образе, что API и консьюмер, в отдельном Compose-проекте с PostgreSQL и RabbitMQ. После прогона проект удаляется. GitHub Actions запускает обе команды на push и pull request. Если Ruff изменил файлы, проверка CI падает.
+`just lint` применяет исправления Ruff и запускает ty и flake8. Для него нужны Python 3.15 и uv. `just test` запускает pytest в общем образе приложения с отдельной тестовой базой PostgreSQL. Тесты обращаются к FastAPI через ASGI и отправляют события через `TestRabbitBroker`. HTTP-ответы вебхука задаёт RESPX. GitHub Actions запускает обе команды на push и pull request. Если Ruff изменил файлы, проверка CI падает.
+
+`just test` выводит покрытие в терминал и сохраняет отчёт в `coverage.lcov`. После прогона на `main` CI отправляет его в Coveralls.

@@ -65,12 +65,13 @@ services:
     profiles: [tests]
     environment:
       <<: *application-environment
+      COVERAGE_FILE: /tmp/.coverage
+      GATEWAY_MIN_DELAY: "0"
+      GATEWAY_MAX_DELAY: "0"
       PYTEST_XDIST_AUTO_NUM_WORKERS: "2"
     depends_on:
-      api:
-        condition: service_started
-      consumer:
-        condition: service_started
+      migrate:
+        condition: service_completed_successfully
 
 volumes:
   postgres:

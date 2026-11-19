@@ -3,5 +3,6 @@
 __pycache__/
 .coverage
 .coverage.*
+coverage.lcov
 .pytest_cache/
 .ruff_cache/

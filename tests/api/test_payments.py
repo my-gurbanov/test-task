@@ -5,8 +5,11 @@ import uuid
 
 import httpx
 import pytest
+import respx
+from faststream import rabbit
 
-from tests import conftest
+from payment_processing.settings import settings
+from tests import conftest, factories
 
 
 @pytest.mark.parametrize("request_method", ["POST", "GET"])
@@ -25,21 +28,21 @@ async def test_payments_require_api_key(api_client: httpx.AsyncClient, request_m
 @pytest.mark.parametrize(
     ("invalid_fields", "supply_idempotency"),
     [
-        ({"amount": "0.001"}, True),
-        ({"amount": 100000000000000.02}, True),
-        ({"currency": "GBP"}, True),
-        ({"webhook_url": "ftp://example.com"}, True),
-        ({"metadata": {"entries": [{"reference": "\x00"}]}}, True),
-        ({}, False),
+        pytest.param({"amount": "0.001"}, True, id="fractional-cent"),
+        pytest.param({"amount": 100000000000000.02}, True, id="numeric-amount"),
+        pytest.param({"currency": "GBP"}, True, id="unsupported-currency"),
+        pytest.param({"webhook_url": "ftp://example.com"}, True, id="unsupported-webhook-scheme"),
+        pytest.param({"metadata": {"entries": [{"reference": "\x00"}]}}, True, id="null-in-metadata"),
+        pytest.param({}, False, id="missing-idempotency-key"),
     ],
 )
 async def test_create_payment_rejects_invalid_input(
     *,
     api_client: httpx.AsyncClient,
-    payment_payload: dict[str, str],
     invalid_fields: dict[str, object],
     supply_idempotency: bool,
 ) -> None:
+    payment_payload: typing.Final = factories.PaymentPayloadFactory.build()
     payment_headers: typing.Final = {"Idempotency-Key": str(uuid.uuid4())} if supply_idempotency else {}
 
     validation_response: typing.Final = await api_client.post(
@@ -50,16 +53,24 @@ async def test_create_payment_rejects_invalid_input(
 
 
 async def test_create_payment_replays_original_acceptance(
-    *, api_client: httpx.AsyncClient, payment_payload: dict[str, str], webhook_server: conftest.WebhookServer
+    *,
+    api_client: httpx.AsyncClient,
+    payment_broker: rabbit.RabbitBroker,
+    respx_mock: respx.MockRouter,
 ) -> None:
     payment_headers: typing.Final = {"Idempotency-Key": str(uuid.uuid4())}
+    payment_payload: typing.Final = factories.PaymentPayloadFactory.build()
     equivalent_payload: typing.Final = payment_payload | {"amount": "19.5"}
+    webhook_route: typing.Final = respx_mock.post(payment_payload["webhook_url"]).respond(http.HTTPStatus.NO_CONTENT)
 
     first_response, second_response = await asyncio.gather(
         api_client.post(conftest.PAYMENTS_PATH, headers=payment_headers, json=payment_payload),
         api_client.post(conftest.PAYMENTS_PATH, headers=payment_headers, json=equivalent_payload),
     )
-    notification: typing.Final = await webhook_server.receive_notification()
+    await payment_broker.publish(
+        {"payment_id": first_response.json()["payment_id"]},
+        queue=settings.rabbitmq_payment_queue,
+    )
     replay_response: typing.Final = await api_client.post(
         conftest.PAYMENTS_PATH, headers=payment_headers, json=payment_payload
     )
@@ -72,12 +83,11 @@ async def test_create_payment_replays_original_acceptance(
     )
     assert first_response.json() == second_response.json() == replay_response.json()
     assert first_response.json()["status"] == "pending"
-    assert first_response.json()["payment_id"] == notification["payment_id"]
+    assert webhook_route.call_count == 1
 
 
-async def test_create_payment_rejects_changed_request_for_existing_key(
-    *, api_client: httpx.AsyncClient, payment_payload: dict[str, str], webhook_server: conftest.WebhookServer
-) -> None:
+async def test_create_payment_rejects_changed_request_for_existing_key(api_client: httpx.AsyncClient) -> None:
+    payment_payload: typing.Final = factories.PaymentPayloadFactory.build()
     payment_headers: typing.Final = {"Idempotency-Key": str(uuid.uuid4())}
     accepted_response: typing.Final = await api_client.post(
         conftest.PAYMENTS_PATH, headers=payment_headers, json=payment_payload
@@ -87,8 +97,6 @@ async def test_create_payment_rejects_changed_request_for_existing_key(
     conflict_response: typing.Final = await api_client.post(
         conftest.PAYMENTS_PATH, headers=payment_headers, json=payment_payload | {"amount": "20.00"}
     )
-    await webhook_server.receive_notification()
-
     assert conflict_response.status_code == http.HTTPStatus.CONFLICT
 
 

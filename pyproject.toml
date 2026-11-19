@@ -25,10 +25,12 @@ dependencies = [
 dev = [
     "community-of-python-flake8-plugin",
     "flake8-pyproject",
+    "polyfactory>=3.5.0",
     "pytest",
     "pytest-asyncio",
     "pytest-cov",
     "pytest-xdist",
+    "respx>=0.23.1",
     "ruff",
     "ty",
 ]
@@ -66,9 +68,15 @@ exclude = [".venv", ".cache"]
 per-file-ignores = ["**/migrations/versions/*.py:COP007"]
 
 [tool.pytest.ini_options]
+addopts = "-n auto --cov --cov-report=term-missing --cov-report=lcov:coverage.lcov"
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["payment_processing"]
+relative_files = true
+omit = ["*/migrations/*"]
 
 [tool.ty.environment]
 python-version = "3.15"
