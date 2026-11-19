@@ -2,11 +2,14 @@ import asyncio
 import http
 import typing
 import uuid
+from unittest import mock
 
 import httpx
 import pytest
 import respx
 from faststream import rabbit
+from sqlalchemy import exc as sqlalchemy_exceptions
+from sqlalchemy.ext import asyncio as sqlalchemy_async
 
 from payment_processing.settings import settings
 from tests import conftest, factories
@@ -106,3 +109,35 @@ async def test_fetch_payment_returns_not_found(api_client: httpx.AsyncClient) ->
     missing_response: typing.Final = await api_client.get(unknown_payment_path)
 
     assert missing_response.status_code == http.HTTPStatus.NOT_FOUND
+
+
+async def test_payment_api_recovers_from_database_errors(api_client: httpx.AsyncClient) -> None:
+    payment_payload: typing.Final = factories.PaymentPayloadFactory.build()
+    payment_headers: typing.Final = {"Idempotency-Key": str(uuid.uuid4())}
+    database_error: typing.Final = sqlalchemy_exceptions.OperationalError(None, None, OSError())
+
+    with mock.patch.object(
+        sqlalchemy_async.AsyncSession,
+        "scalar",
+        autospec=True,
+        wraps=sqlalchemy_async.AsyncSession.scalar,
+        side_effect=[database_error, mock.DEFAULT],
+    ) as insert_payment:
+        accepted_response: typing.Final = await api_client.post(
+            conftest.PAYMENTS_PATH, headers=payment_headers, json=payment_payload
+        )
+    accepted_response.raise_for_status()
+    payment_id: typing.Final = accepted_response.json()["payment_id"]
+    with mock.patch.object(
+        sqlalchemy_async.AsyncSession,
+        "execute",
+        autospec=True,
+        wraps=sqlalchemy_async.AsyncSession.execute,
+        side_effect=[database_error, mock.DEFAULT],
+    ) as fetch_payment:
+        fetched_response: typing.Final = await api_client.get(f"{conftest.PAYMENTS_PATH}/{payment_id}")
+
+    assert insert_payment.await_count == fetch_payment.await_count == 2
+    assert accepted_response.status_code == http.HTTPStatus.ACCEPTED
+    assert fetched_response.status_code == http.HTTPStatus.OK
+    assert fetched_response.json()["payment_id"] == payment_id

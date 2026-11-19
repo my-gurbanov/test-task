@@ -3,11 +3,15 @@ import json
 import time
 import typing
 import uuid
+from unittest import mock
 
 import httpx
 import pytest
 import respx
 from faststream import rabbit
+from faststream.rabbit.message import RabbitMessage
+from sqlalchemy import exc as sqlalchemy_exceptions
+from sqlalchemy.ext import asyncio as sqlalchemy_async
 
 from payment_processing.settings import settings
 from tests import conftest, factories
@@ -18,7 +22,7 @@ from tests import conftest, factories
     ["succeeded", "failed"],
     ids=["gateway-accepted", "gateway-declined"],
 )
-async def test_payment_is_processed_and_notified(
+async def test_payment_is_processed_and_notified_once_on_redelivery(
     *,
     api_client: httpx.AsyncClient,
     payment_broker: rabbit.RabbitBroker,
@@ -36,8 +40,10 @@ async def test_payment_is_processed_and_notified(
     )
     accepted_response.raise_for_status()
     payment_id: typing.Final = accepted_response.json()["payment_id"]
+    payment_event: typing.Final = {"payment_id": payment_id}
 
-    await payment_broker.publish({"payment_id": payment_id}, queue=settings.rabbitmq_payment_queue)
+    await payment_broker.publish(payment_event, queue=settings.rabbitmq_payment_queue)
+    await payment_broker.publish(payment_event, queue=settings.rabbitmq_payment_queue)
     detail_response: typing.Final = await api_client.get(f"{conftest.PAYMENTS_PATH}/{payment_id}")
 
     assert accepted_response.status_code == http.HTTPStatus.ACCEPTED
@@ -116,3 +122,37 @@ async def test_webhook_attempt_limit_survives_redelivery(
     first_attempt, second_attempt, third_attempt = delivery_times
     assert second_attempt - first_attempt >= 0.95
     assert third_attempt - second_attempt >= 1.95
+
+
+async def test_payment_is_requeued_while_database_is_unavailable(
+    *,
+    api_client: httpx.AsyncClient,
+    payment_broker: rabbit.RabbitBroker,
+    respx_mock: respx.MockRouter,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "database_redelivery_delay", 0.01)
+    payment_payload: typing.Final = factories.PaymentPayloadFactory.build()
+    webhook_route: typing.Final = respx_mock.post(payment_payload["webhook_url"]).respond(http.HTTPStatus.NO_CONTENT)
+    accepted_response: typing.Final = await api_client.post(
+        conftest.PAYMENTS_PATH,
+        headers={"Idempotency-Key": str(uuid.uuid4())},
+        json=payment_payload,
+    )
+    accepted_response.raise_for_status()
+    payment_event: typing.Final = {"payment_id": accepted_response.json()["payment_id"]}
+    database_error: typing.Final = sqlalchemy_exceptions.OperationalError(None, None, OSError())
+
+    with (
+        mock.patch.object(sqlalchemy_async.AsyncSession, "execute", side_effect=database_error) as fetch_payment,
+        mock.patch.object(RabbitMessage, "nack", autospec=True, wraps=RabbitMessage.nack) as nack_message,
+    ):
+        await payment_broker.publish(payment_event, queue=settings.rabbitmq_payment_queue)
+
+    assert fetch_payment.await_count == settings.database_retry_attempts
+    nack_message.assert_awaited_once()
+    assert not webhook_route.called
+
+    await payment_broker.publish(payment_event, queue=settings.rabbitmq_payment_queue)
+
+    assert webhook_route.call_count == 1
